@@ -1,6 +1,7 @@
 package khatool
 
 import (
+	"fmt"
 	"sync"
 	"unicode"
 )
@@ -134,4 +135,59 @@ func PrevBase(runes []rune, i int) rune {
 		}
 	}
 	return 0
+}
+
+// Substitute is the visible stand-in for a rune that must not reach the
+// renderer as itself: the C0 controls and DEL as the caret forms every terminal
+// user knows (^@, ^I, ^[), and anything else as its codepoint in hex.
+//
+// C1 is the range that makes this more than a convenience. U+0080..U+009F
+// arrives as ordinary two-byte UTF-8 and no width table calls it special, but a
+// terminal decoding UTF-8 honours those codepoints as controls, and the range
+// holds the string introducers -- DCS, SOS, CSI, ST, OSC, PM, APC. One of them
+// emitted from a binary file makes the terminal swallow everything after it as
+// a control string, so the rest of the line vanishes until a terminator that
+// may never come.
+//
+// The form is always plain ASCII, so its cell count is its rune count and a
+// caller's width model cannot disagree with what gets drawn.
+func Substitute(r rune) string {
+	v := int(r)
+	if v <= 27 {
+		switch v {
+		case 0:
+			return "^@"
+		case 27:
+			return "^["
+		}
+		return "^" + string(rune(v+64))
+	}
+	if v <= 0xFF {
+		// One byte of hex reads unambiguously on its own: FE.
+		return fmt.Sprintf("%02X", v)
+	}
+	// Past one byte the digits need a boundary, or a run of substituted
+	// codepoints reads as one long number: (0123). Wider planes keep whole byte
+	// pairs.
+	if v <= 0xFFFF {
+		return fmt.Sprintf("(%04X)", v)
+	}
+	return fmt.Sprintf("(%06X)", v)
+}
+
+// MarkForm is what a caller draws for a mark DefectiveMark rejects: a dotted
+// circle supplying the base it has none of, with the mark composed onto it.
+//
+// This is the Unicode convention for showing an isolated combining mark, and it
+// is what a shaper already does for a defective cluster -- so the reader sees
+// the actual mark rather than a number, and it costs the circle's cell plus
+// whatever the mark itself advances (nothing, for a non-spacing mark).
+//
+// It matters that the pair is drawn rather than left as a bare mark. A mark
+// with no base it can attach to is corruption, not text, and it cannot be
+// painted as zero-width: a renderer whose shaper rejects the pairing falls back
+// to a SPACING glyph that advances a cell nobody budgeted, sliding the rest of
+// the line along.
+func MarkForm(r rune) string {
+	return string(MarkAnchor) + string(r)
 }
