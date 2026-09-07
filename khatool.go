@@ -232,7 +232,21 @@ func appendReversed(perm []int, runes []rune, start, end int, rides Rides) []int
 //   - RTL base: the entire run sequence is reversed (the line reads from the
 //     right), RTL run contents reversed, LTR/numeric run contents kept.
 func Order(runes []rune, baseRTL bool, rides Rides) *Layout {
-	return order(runes, baseRTL, false, rides)
+	return order(runes, baseRTL, false, rides, Marks{})
+}
+
+// Marks says which of a marked line's marks are drawn.
+type Marks struct {
+	// LineEnd draws the closing bar at the LINE's own reading end -- past the
+	// last fragment, when that fragment reads the way the line does.
+	//
+	// As notation it says nothing the line has not: the reading stops at the
+	// end of the line whether or not a bar marks it. As a CELL it is somewhere
+	// to put the caret's last position, which on a line whose reading ends at
+	// the left sits out past the leftmost character with no character of its
+	// own to stand on. A caller that reserves its own room there leaves this
+	// off; one that has nowhere else to put that caret keeps it.
+	LineEnd bool
 }
 
 // OrderMarked is Order with direction markers: a synthetic one-column marker
@@ -242,10 +256,15 @@ func Order(runes []rune, baseRTL bool, rides Rides) *Layout {
 // transition itself (rendered one column wide by consumers when Layout.Marked
 // is set). It is how a caller shows the reader where the direction turned.
 func OrderMarked(runes []rune, baseRTL bool, rides Rides) *Layout {
-	return order(runes, baseRTL, true, rides)
+	return order(runes, baseRTL, true, rides, Marks{LineEnd: true})
 }
 
-func order(runes []rune, baseRTL bool, marked bool, rides Rides) *Layout {
+// OrderMarkedWith is OrderMarked with a say over which marks are drawn.
+func OrderMarkedWith(runes []rune, baseRTL bool, rides Rides, m Marks) *Layout {
+	return order(runes, baseRTL, true, rides, m)
+}
+
+func order(runes []rune, baseRTL bool, marked bool, rides Rides, opt Marks) *Layout {
 	if rides == nil {
 		rides = DefaultRides
 	}
@@ -271,25 +290,44 @@ func order(runes []rune, baseRTL bool, marked bool, rides Rides) *Layout {
 		return nil // resolved to pure LTR after all
 	}
 
-	// markedRun reports whether a fragment gets a marker: every fragment
-	// after the first, plus a line-initial fragment in the foreign
-	// direction. A fragment led by an explicit direction control speaks for
-	// itself (the control renders as the marker).
+	// Which fragments get which mark. Each carries the arrow it reads AWAY
+	// from where its reading begins, and a bar where its reading stops.
+	//
+	// Two are left off, and for one reason: a mark that says nothing the
+	// line's own direction has not already said. A reader starts at the first
+	// fragment and stops at the last, so where those read the way the line
+	// does, an arrow at the very place the reading starts and a bar at the
+	// place it was always going to end tell them what they can already see.
+	//
+	// A fragment led by an explicit direction control speaks for itself -- the
+	// control renders as the marker -- and gets neither.
 	logicalIdx := make(map[int]int, len(runs)) // run start -> logical order
 	for i, rn := range runs {
 		logicalIdx[rn.start] = i
 	}
-	markedRun := func(rn run) bool {
-		if !marked {
+	marks := func(rn run) bool {
+		return marked && !IsDirectionControl(runes[rn.start])
+	}
+	// The first fragment in reading order, where it reads the way the line
+	// does, is not bracketed at all: nothing preceded it, so there is no turn
+	// to announce, and the reader is already inside it before any notation
+	// could apply.
+	bare := func(rn run) bool {
+		return logicalIdx[rn.start] == 0 && rn.rtl == baseRTL
+	}
+	startMark := func(rn run) bool {
+		return marks(rn) && !bare(rn)
+	}
+	// The closing bar at the LINE's own end is the caller's to ask for (see
+	// Marks.LineEnd); everywhere else a marked fragment closes.
+	endMark := func(rn run) bool {
+		if !marks(rn) || bare(rn) {
 			return false
 		}
-		if IsDirectionControl(runes[rn.start]) {
-			return false
+		if opt.LineEnd {
+			return true
 		}
-		if logicalIdx[rn.start] == 0 {
-			return rn.rtl != baseRTL
-		}
-		return true
+		return logicalIdx[rn.start] != len(runs)-1 || rn.rtl != baseRTL
 	}
 
 	perm := make([]int, 0, len(runes)+2*len(runs))
@@ -298,21 +336,21 @@ func order(runes []rune, baseRTL bool, marked bool, rides Rides) *Layout {
 			// Leading edge of an RTL fragment is its RIGHTMOST cell: the
 			// begin marker follows the reversed content, and the end marker
 			// (the fragment's reading end) precedes it on the left.
-			if markedRun(rn) {
+			if endMark(rn) {
 				perm = append(perm, MarkerEnd)
 			}
 			perm = appendReversed(perm, runes, rn.start, rn.end, rides)
-			if markedRun(rn) {
+			if startMark(rn) {
 				perm = append(perm, MarkerRTL)
 			}
 		} else {
-			if markedRun(rn) {
+			if startMark(rn) {
 				perm = append(perm, MarkerLTR)
 			}
 			for i := rn.start; i <= rn.end; i++ {
 				perm = append(perm, i)
 			}
-			if markedRun(rn) {
+			if endMark(rn) {
 				perm = append(perm, MarkerEnd)
 			}
 		}

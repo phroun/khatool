@@ -112,8 +112,12 @@ func TestMirrorBrackets(t *testing.T) {
 // markedVisual renders a marked layout as a string, with marker slots as
 // their glyphs.
 func markedVisual(s string, baseRTL bool) string {
+	return markedVisualWith(s, baseRTL, Marks{LineEnd: true})
+}
+
+func markedVisualWith(s string, baseRTL bool, m Marks) string {
 	runes := []rune(s)
-	l := OrderMarked(runes, baseRTL, nil)
+	l := OrderMarkedWith(runes, baseRTL, nil, m)
 	if l == nil {
 		return s
 	}
@@ -133,9 +137,10 @@ func markedVisual(s string, baseRTL bool) string {
 	return string(out)
 }
 
-// Direction markers sit at each fragment's leading edge: "<" at the RIGHT of
-// an RTL fragment, ">" at the LEFT of a returning LTR fragment. The
-// line-initial natural fragment is unmarked.
+// Direction markers bracket each fragment: the arrow it reads AWAY from at its
+// leading edge -- "<" at the RIGHT of an RTL fragment, ">" at the LEFT of a
+// returning LTR one -- and a bar where its reading stops. The line-initial
+// natural fragment is unmarked.
 func TestMarkedLayout(t *testing.T) {
 	if got := markedVisual("abc שלום xyz", false); got != "abc |םולש<> xyz|" {
 		t.Fatalf("marked visual: %q", got)
@@ -276,6 +281,34 @@ func TestDefectiveMarkLeavesAnLTRLineAlone(t *testing.T) {
 	for i, p := range lay.Perm {
 		if p != i {
 			t.Fatalf("perm %v, want logical order on an LTR line", lay.Perm)
+		}
+	}
+}
+
+// The bar at the LINE's own end is the caller's to ask for. As notation it says
+// nothing the line has not — the reading stops at the end of the line whether or
+// not a bar marks it — so a caller that has its own room for the caret's last
+// position leaves it off.
+func TestTheLineEndBarIsOptional(t *testing.T) {
+	for _, c := range []struct {
+		text       string
+		baseRTL    bool
+		with, less string
+	}{
+		// The line ends left to right, the way it reads: the bar goes.
+		{"abc שלום xyz", false, "abc |םולש<> xyz|", "abc |םולש<> xyz"},
+		// It ends right to left, the way it reads: the bar there is at the far
+		// LEFT of the line, and it goes too.
+		{"אבג abc דהו", true, "|והד <>abc| גבא", "והד <>abc| גבא"},
+		// It ends in the OTHER direction: that fragment's bar is a real turn
+		// marker, and it stays either way.
+		{"abc שלום", false, "abc |םולש<", "abc |םולש<"},
+	} {
+		if got := markedVisualWith(c.text, c.baseRTL, Marks{LineEnd: true}); got != c.with {
+			t.Errorf("%q with the line-end bar: %q, want %q", c.text, got, c.with)
+		}
+		if got := markedVisualWith(c.text, c.baseRTL, Marks{}); got != c.less {
+			t.Errorf("%q without it: %q, want %q", c.text, got, c.less)
 		}
 	}
 }
