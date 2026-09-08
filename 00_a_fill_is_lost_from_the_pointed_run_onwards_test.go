@@ -19,7 +19,7 @@ func TestTheFillIsLostFromThePointedRunOnwards(t *testing.T) {
 	// placed, '.' where it can, one character per rune.
 	marked := func(s string, folding bool) string {
 		out := make([]rune, 0, len(s))
-		for _, give := range UnplaceableFillAfterFold([]rune(s), folding, nil) {
+		for _, give := range UnplaceableFillAfterFold([]rune(s), folding, nil, nil) {
 			if give {
 				out = append(out, '#')
 			} else {
@@ -91,12 +91,47 @@ func TestNothingGivesUpWhatTheLineWouldKeep(t *testing.T) {
 		for _, folding := range []bool{false, true} {
 			runes := []rune(text)
 			line := HasZeroWidthAfterFold(runes, folding, nil)
-			for i, give := range UnplaceableFillAfterFold(runes, folding, nil) {
+			for i, give := range UnplaceableFillAfterFold(runes, folding, nil, nil) {
 				if give && !line {
 					t.Errorf("%q folding=%v: rune %d gave up its fill on a line "+
 						"with nothing to give up", text, folding, i)
 				}
 			}
+		}
+	}
+}
+
+// "After" means after in the STREAM the cells go out in, not after in the rune
+// array. On a line whose base direction is right-to-left those are opposite
+// ends: the pointed run is drawn at the LEFT, and what follows it on the screen
+// is what came BEFORE it in the text. Marking the array's tail there gives up
+// the wrong half of the line.
+func TestAfterMeansAfterOnTheScreen(t *testing.T) {
+	// Four runes: a pointed Hebrew letter, then three Latin ones. Under a
+	// right-to-left base the Hebrew is drawn leftmost and the Latin follows it
+	// across the screen, so the whole row gives up its fill.
+	runes := []rune("ש" + testVowel + "abc")
+	rtl := []int{0, 1, 2, 3, 4} // ש vowel a b c, left to right on screen
+
+	got := UnplaceableFillAfterFold(runes, false, nil, rtl)
+	for i, give := range got {
+		if !give {
+			t.Errorf("rune %d kept its fill, but it is drawn after the pointed run", i)
+		}
+	}
+
+	// The same runes drawn the other way round -- the Latin first, the Hebrew
+	// last -- give up only from the Hebrew on.
+	ltr := []int{2, 3, 4, 0, 1} // a b c ש vowel
+	got = UnplaceableFillAfterFold(runes, false, nil, ltr)
+	for _, i := range []int{2, 3, 4} {
+		if got[i] {
+			t.Errorf("rune %d gave up its fill, but it is drawn before the pointed run", i)
+		}
+	}
+	for _, i := range []int{0, 1} {
+		if !got[i] {
+			t.Errorf("rune %d kept its fill, but it is the pointed run itself", i)
 		}
 	}
 }

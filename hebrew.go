@@ -231,10 +231,22 @@ func HasZeroWidthAfterFold(runes []rune, folding bool, zeroWidth func(rune) bool
 // one. Runes outside every run are false: there is nothing to reorder and the
 // fill lands where it was put.
 //
+// visual is the order the cells go out in: visual[slot] is the logical index of
+// the rune drawn in that slot, which is what a caller that has already ordered
+// the line holds. It matters because "after" means after in the STREAM, and on
+// a line whose base direction is right-to-left that is the opposite end of the
+// rune array -- mark the array's tail there and the wrong half of the line
+// gives up its fill. nil says the two orders are the same, which they are on a
+// line with no ordering to do.
+//
+// The answer comes back indexed by LOGICAL rune either way, since that is what
+// a caller asks its questions in.
+//
 // zeroWidth is the caller's own width model, as it is for HasZeroWidthAfterFold
 // and for Rides, so one line does not get two disagreeing pictures of itself.
 // nil takes every non-spacing mark.
-func UnplaceableFillAfterFold(runes []rune, folding bool, zeroWidth func(rune) bool) []bool {
+func UnplaceableFillAfterFold(runes []rune, folding bool, zeroWidth func(rune) bool,
+	visual []int) []bool {
 	if zeroWidth == nil {
 		zeroWidth = func(r rune) bool { return unicode.In(r, unicode.Mn, unicode.Me) }
 	}
@@ -268,14 +280,44 @@ func UnplaceableFillAfterFold(runes []rune, folding bool, zeroWidth func(rune) b
 			}
 		}
 		if HasZeroWidthAfterFold(runes[i:end+1], folding, zeroWidth) {
-			// From here to the end of the line. The run's own fill is
-			// misplaced, and everything after it is carried along.
-			for k := i; k < len(runes); k++ {
+			for k := i; k <= end; k++ {
 				out[k] = true
 			}
-			return out
 		}
 		i = end + 1
 	}
-	return out
+	return spreadRightward(out, visual)
+}
+
+// spreadRightward carries a run's answer to everything drawn after it. The
+// run's own fill is misplaced and the fill for every cell the terminal reads
+// afterwards is carried along with it, so once one slot has given up, so has
+// every slot to its right.
+func spreadRightward(marked []bool, visual []int) []bool {
+	at := func(slot int) int {
+		if visual == nil {
+			return slot
+		}
+		if slot >= len(visual) {
+			return -1
+		}
+		return visual[slot]
+	}
+	slots := len(marked)
+	if visual != nil {
+		slots = len(visual)
+	}
+	spreading := false
+	for slot := 0; slot < slots; slot++ {
+		i := at(slot)
+		if i < 0 || i >= len(marked) {
+			continue
+		}
+		if marked[i] {
+			spreading = true
+		} else if spreading {
+			marked[i] = true
+		}
+	}
+	return marked
 }
