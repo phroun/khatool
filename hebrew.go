@@ -206,16 +206,23 @@ func HasZeroWidthAfterFold(runes []rune, folding bool, zeroWidth func(rune) bool
 	return false
 }
 
-// ZeroWidthRunsAfterFold marks, for each rune, whether it sits in a
-// right-to-left run that still carries a zero-width mark once each cluster has
-// been folded into its presentation form.
+// UnplaceableFillAfterFold marks, for each rune, whether a background fill on
+// its cell can still be placed by a terminal that reorders what it is sent.
 //
-// It is HasZeroWidthAfterFold's question asked of a RUN rather than a whole
-// line, because a terminal that misplaces the fill misplaces it one run at a
-// time -- what it reorders as a unit is what it counts wrongly. A row of
-// chrome and English with one pointed word in it has that word's run to give up
-// and everything else to paint as usual, so a caller that gave up the row for a
-// single vowel lost the fill everywhere it would have been right.
+// It is HasZeroWidthAfterFold's question asked per POSITION rather than of a
+// whole line, because such a terminal misplaces the fill from one point
+// onwards rather than everywhere. The damage starts at the first right-to-left
+// run still carrying a zero-width mark after folding, and runs to the end of
+// the line: that run's fill slides off the cells it was meant for, and
+// everything after it slides with it. What comes BEFORE is placed correctly
+// and keeps its fill, which is the whole point of asking -- a row of chrome
+// and English with one pointed word in it has no business losing the fill on
+// the half that would have been right.
+//
+// The trailing half matters as much as the run itself. A lone selected full
+// stop after a pointed word is in no run of its own, and left with a fill it
+// lands somewhere else entirely: one stray cell of colour behind a letter that
+// was never selected.
 //
 // A run is what such a terminal takes as that unit: a span opened by a strong
 // right-to-left rune, carrying the marks that ride its letters, and absorbing
@@ -227,7 +234,7 @@ func HasZeroWidthAfterFold(runes []rune, folding bool, zeroWidth func(rune) bool
 // zeroWidth is the caller's own width model, as it is for HasZeroWidthAfterFold
 // and for Rides, so one line does not get two disagreeing pictures of itself.
 // nil takes every non-spacing mark.
-func ZeroWidthRunsAfterFold(runes []rune, folding bool, zeroWidth func(rune) bool) []bool {
+func UnplaceableFillAfterFold(runes []rune, folding bool, zeroWidth func(rune) bool) []bool {
 	if zeroWidth == nil {
 		zeroWidth = func(r rune) bool { return unicode.In(r, unicode.Mn, unicode.Me) }
 	}
@@ -261,9 +268,12 @@ func ZeroWidthRunsAfterFold(runes []rune, folding bool, zeroWidth func(rune) boo
 			}
 		}
 		if HasZeroWidthAfterFold(runes[i:end+1], folding, zeroWidth) {
-			for k := i; k <= end; k++ {
+			// From here to the end of the line. The run's own fill is
+			// misplaced, and everything after it is carried along.
+			for k := i; k < len(runes); k++ {
 				out[k] = true
 			}
+			return out
 		}
 		i = end + 1
 	}

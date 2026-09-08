@@ -9,16 +9,17 @@ const (
 	testPoint = "ּ" // dagesh
 )
 
-// A terminal that reorders what it is sent misplaces a background fill one RUN
-// at a time -- what it takes as a unit is what it counts wrongly. So a row of
-// chrome and English with one pointed word in it gives up the fill on that
-// word and keeps it everywhere else.
-func TestOnlyTheRunCarryingMarksGivesUpItsFill(t *testing.T) {
+// A terminal that reorders what it is sent misplaces a background fill from one
+// point onwards: the first right-to-left run still carrying a mark, and
+// everything after it. What comes before is placed correctly and keeps its
+// fill, so a row of chrome and English with one pointed word in it gives up
+// only from that word on.
+func TestTheFillIsLostFromThePointedRunOnwards(t *testing.T) {
 	// marked renders the answer as a picture: '#' where the fill cannot be
 	// placed, '.' where it can, one character per rune.
 	marked := func(s string, folding bool) string {
 		out := make([]rune, 0, len(s))
-		for _, give := range ZeroWidthRunsAfterFold([]rune(s), folding, nil) {
+		for _, give := range UnplaceableFillAfterFold([]rune(s), folding, nil) {
 			if give {
 				out = append(out, '#')
 			} else {
@@ -40,25 +41,25 @@ func TestOnlyTheRunCarryingMarksGivesUpItsFill(t *testing.T) {
 		// A right-to-left run with no marks is reordered but counted correctly.
 		{"hebrew, no marks", "abc שלום xyz", false, "............"},
 
-		// One vowel, and only its own run gives up -- the English on either
-		// side of it keeps the fill it would have been given correctly.
+		// One vowel: the English BEFORE it keeps the fill it would have been
+		// given correctly, and everything from the run on is carried off.
 		{"one pointed word", "abc ש" + testVowel + "לום xyz", false,
-			"....#####...."},
+			"....#########"},
 
 		// The mark is on the run's LAST letter, where a run that stopped at its
 		// last strong rune would have left it out.
 		{"mark on the last letter", "abc שלום" + testVowel + " xyz", false,
-			"....#####...."},
+			"....#########"},
 
 		// Two right-to-left words with only a space between them are one run to
 		// such a terminal, so a vowel in either gives up both.
 		{"two words, one vowel", "שלום ר" + testVowel + "ב", false,
 			"########"},
 
-		// Strong left-to-right content between them makes two runs, and only
-		// the one carrying the vowel gives up.
+		// A vowel in the first of two runs takes the second with it: the
+		// damage runs to the end of the line, not to the end of the run.
 		{"two runs, one vowel", "ש" + testVowel + "לום x רב", false,
-			"#####....."},
+			"##########"},
 
 		// A point that folds into its base leaves the count, so with folding on
 		// the run comes out even and keeps the ordinary fill.
@@ -75,10 +76,10 @@ func TestOnlyTheRunCarryingMarksGivesUpItsFill(t *testing.T) {
 	}
 }
 
-// No run gives up its fill on a line that has nothing to give up. The line can
-// say yes where every run says no -- a mark with no right-to-left run to sit in
-// is in none of them -- but never the other way round.
-func TestNoRunGivesUpWhatTheLineWouldKeep(t *testing.T) {
+// Nothing gives up its fill on a line that has nothing to give up. The line can
+// say yes where every position says no -- a mark with no right-to-left run to
+// sit in opens none -- but never the other way round.
+func TestNothingGivesUpWhatTheLineWouldKeep(t *testing.T) {
 	for _, text := range []string{
 		"hello",
 		"abc שלום xyz",
@@ -90,7 +91,7 @@ func TestNoRunGivesUpWhatTheLineWouldKeep(t *testing.T) {
 		for _, folding := range []bool{false, true} {
 			runes := []rune(text)
 			line := HasZeroWidthAfterFold(runes, folding, nil)
-			for i, give := range ZeroWidthRunsAfterFold(runes, folding, nil) {
+			for i, give := range UnplaceableFillAfterFold(runes, folding, nil) {
 				if give && !line {
 					t.Errorf("%q folding=%v: rune %d gave up its fill on a line "+
 						"with nothing to give up", text, folding, i)
