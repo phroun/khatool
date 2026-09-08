@@ -205,3 +205,67 @@ func HasZeroWidthAfterFold(runes []rune, folding bool, zeroWidth func(rune) bool
 	}
 	return false
 }
+
+// ZeroWidthRunsAfterFold marks, for each rune, whether it sits in a
+// right-to-left run that still carries a zero-width mark once each cluster has
+// been folded into its presentation form.
+//
+// It is HasZeroWidthAfterFold's question asked of a RUN rather than a whole
+// line, because a terminal that misplaces the fill misplaces it one run at a
+// time -- what it reorders as a unit is what it counts wrongly. A row of
+// chrome and English with one pointed word in it has that word's run to give up
+// and everything else to paint as usual, so a caller that gave up the row for a
+// single vowel lost the fill everywhere it would have been right.
+//
+// A run is what such a terminal takes as that unit: a span opened by a strong
+// right-to-left rune, carrying the marks that ride its letters, and absorbing
+// what is neither strong nor a mark -- the spaces between words -- as long as
+// another strong right-to-left rune follows before any strong left-to-right
+// one. Runes outside every run are false: there is nothing to reorder and the
+// fill lands where it was put.
+//
+// zeroWidth is the caller's own width model, as it is for HasZeroWidthAfterFold
+// and for Rides, so one line does not get two disagreeing pictures of itself.
+// nil takes every non-spacing mark.
+func ZeroWidthRunsAfterFold(runes []rune, folding bool, zeroWidth func(rune) bool) []bool {
+	if zeroWidth == nil {
+		zeroWidth = func(r rune) bool { return unicode.In(r, unicode.Mn, unicode.Me) }
+	}
+	strongLTR := func(r rune) bool {
+		if IsStrongRTL(r) || zeroWidth(r) {
+			return false
+		}
+		return unicode.IsLetter(r) || unicode.IsDigit(r)
+	}
+	out := make([]bool, len(runes))
+	for i := 0; i < len(runes); {
+		if !IsStrongRTL(runes[i]) {
+			i++
+			continue
+		}
+		// The run reaches as far as its last strong rune, plus the marks riding
+		// that rune; a neutral between two of them is inside it, and strong
+		// left-to-right content ends it.
+		end := i
+	run:
+		for j := i + 1; j < len(runes); j++ {
+			switch {
+			case IsStrongRTL(runes[j]):
+				end = j
+			case zeroWidth(runes[j]):
+				if j == end+1 {
+					end = j // a mark riding the run's last letter
+				}
+			case strongLTR(runes[j]):
+				break run
+			}
+		}
+		if HasZeroWidthAfterFold(runes[i:end+1], folding, zeroWidth) {
+			for k := i; k <= end; k++ {
+				out[k] = true
+			}
+		}
+		i = end + 1
+	}
+	return out
+}
