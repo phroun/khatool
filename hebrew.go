@@ -321,3 +321,64 @@ func spreadRightward(marked []bool, visual []int) []bool {
 	}
 	return marked
 }
+
+// MarkDropped stands where a combining mark was, for a caller told not to show
+// the marks that ride a right-to-left letter. It is the same idea as
+// LigatureAbsorbed: the position is still there, so a caller's own indexing
+// survives, but nothing is drawn for it.
+const MarkDropped rune = -2
+
+// FoldRidingMarks says what to draw for each rune when the combining marks that
+// ride a right-to-left letter are not to be shown. The answer is one rune per
+// input rune, so a caller that has already worked out where each of them goes
+// keeps its own indexing: the rune itself where nothing changes, the folded
+// base where a cluster folds, and MarkDropped where a mark is not drawn at all.
+//
+// It is what a display gives up when it wants its colour back. A terminal that
+// reorders what it is sent miscounts a background fill over any line still
+// carrying zero-width marks, and the marks are the only thing on such a line
+// that can be given up -- so an application that would rather keep its
+// selection bars, its highlights and its gutter than its vowels drops them, and
+// pointed Hebrew renders one codepoint per cell the way pre-shaped Arabic does.
+//
+// folding is what makes that bearable. A point with a presentation form (the
+// dagesh, the shin and sin dots, the rafe, the holam-haser) folds INTO its
+// letter, so it survives as one glyph and only the vowels and accents go. With
+// folding off there is nothing to fold into and every riding mark is dropped.
+//
+// A mark on a left-to-right base is left alone: it is not what the reordering
+// miscounts, and this is not a rule about combining marks in general.
+//
+// zeroWidth is the caller's own width model, for the reason it is everywhere
+// else here: two answers about which runes take a cell is two disagreeing
+// pictures of one line. nil takes every non-spacing mark.
+func FoldRidingMarks(runes []rune, folding bool, zeroWidth func(rune) bool) []rune {
+	if zeroWidth == nil {
+		zeroWidth = func(r rune) bool { return unicode.In(r, unicode.Mn, unicode.Me) }
+	}
+	out := make([]rune, len(runes))
+	copy(out, runes)
+	for i := 0; i < len(runes); {
+		// The cluster: a base and the marks that ride it.
+		j := i + 1
+		for j < len(runes) && zeroWidth(runes[j]) {
+			j++
+		}
+		// A mark with no base of its own is nobody's rider, and a left-to-right
+		// base keeps everything it carries.
+		if zeroWidth(runes[i]) || !IsStrongRTL(runes[i]) {
+			i = j
+			continue
+		}
+		if folding {
+			if folded, ok := PrecomposeCluster(runes[i:j]); ok {
+				out[i] = folded[0]
+			}
+		}
+		for k := i + 1; k < j; k++ {
+			out[k] = MarkDropped
+		}
+		i = j
+	}
+	return out
+}
