@@ -8,6 +8,8 @@
 // otherwise have to compose two.
 package khatool
 
+import "unicode"
+
 // dageshForm maps a Hebrew base letter + dagesh/mapiq to its presentation form.
 // Letters with no such form (het, ayin, the final mem/nun/tsadi) are absent;
 // their dagesh is dropped by PrecomposeCluster.
@@ -147,4 +149,59 @@ func ComposedBase(runes []rune) (rune, bool) {
 		return 0, false
 	}
 	return folded[0], true
+}
+
+// HasZeroWidthAfterFold reports whether the runes still carry a ZERO-WIDTH one
+// once each cluster has been folded into its presentation form.
+//
+// It answers a question about what a renderer can safely paint OVER. A terminal
+// that runs its own bidi counts codepoints where a grid counts cells, so a
+// background fill -- a selection bar, a highlight -- over a line holding
+// combining marks lands on the wrong cells and half-vanishes. Foreground colour
+// and weight ride each glyph through that reordering intact, so a caller with
+// such a line reaches for those instead.
+//
+// Folding is what makes it worth asking per line rather than per script. A
+// point that folds into its base no longer inflates the codepoint count, so a
+// line of pointed consonants comes out even and keeps the ordinary fill; only
+// marks that survive the fold -- vowels, accents, points with no form to fold
+// into -- force the other treatment.
+//
+// zeroWidth is the caller's own width model, for the reason Rides is: two
+// answers about which runes take a cell means two disagreeing pictures of one
+// line. nil takes every non-spacing mark, which is the plain reading.
+func HasZeroWidthAfterFold(runes []rune, folding bool, zeroWidth func(rune) bool) bool {
+	if zeroWidth == nil {
+		zeroWidth = func(r rune) bool { return unicode.In(r, unicode.Mn, unicode.Me) }
+	}
+	if !folding {
+		for _, r := range runes {
+			if zeroWidth(r) {
+				return true
+			}
+		}
+		return false
+	}
+	for i := 0; i < len(runes); {
+		// A leading zero-width mark with no base of its own still counts.
+		if zeroWidth(runes[i]) {
+			return true
+		}
+		// Gather the zero-width marks riding this base into one cluster.
+		j := i + 1
+		for j < len(runes) && zeroWidth(runes[j]) {
+			j++
+		}
+		folded, ok := PrecomposeCluster(runes[i:j])
+		if !ok {
+			folded = runes[i:j] // nothing folds: the cluster stands as written
+		}
+		for _, fr := range folded[1:] { // marks left over after the base
+			if zeroWidth(fr) {
+				return true
+			}
+		}
+		i = j
+	}
+	return false
 }
