@@ -126,7 +126,7 @@ type joinType uint8
 
 const (
 	joinNone        joinType = iota // U: no joining
-	joinRight                       // R: joins only to the previous letter
+	joinRight                       // R: joins only to the preceding letter
 	joinDual                        // D: joins both sides
 	joinCausing                     // C: tatweel, ZWJ
 	joinTransparent                 // T: combining marks (skipped in context)
@@ -151,9 +151,9 @@ func joiningTypeOf(r rune) joinType {
 	return joinNone
 }
 
-// prevMeaningful / nextMeaningful return the joining type of the nearest
+// precedingMeaningful / followingMeaningful return the joining type of the nearest
 // non-transparent neighbour (joinNone when there is none).
-func prevMeaningful(runes []rune, i int) joinType {
+func precedingMeaningful(runes []rune, i int) joinType {
 	for j := i - 1; j >= 0; j-- {
 		if t := joiningTypeOf(runes[j]); t != joinTransparent {
 			return t
@@ -162,16 +162,16 @@ func prevMeaningful(runes []rune, i int) joinType {
 	return joinNone
 }
 
-func nextMeaningful(runes []rune, i int) joinType {
-	if j := nextMeaningfulIdx(runes, i); j >= 0 {
+func followingMeaningful(runes []rune, i int) joinType {
+	if j := followingMeaningfulIdx(runes, i); j >= 0 {
 		return joiningTypeOf(runes[j])
 	}
 	return joinNone
 }
 
-// nextMeaningfulIdx returns the index of the nearest following non-transparent
+// followingMeaningfulIdx returns the index of the nearest following non-transparent
 // rune (skipping combining marks), or -1 when there is none.
-func nextMeaningfulIdx(runes []rune, i int) int {
+func followingMeaningfulIdx(runes []rune, i int) int {
 	for j := i + 1; j < len(runes); j++ {
 		if joiningTypeOf(runes[j]) != joinTransparent {
 			return j
@@ -212,9 +212,9 @@ func Shape(runes []rune) []rune {
 		// context, exactly as it is for every other shaping decision; the mark
 		// stays put and rides the ligature cell.
 		if r == 0x0644 {
-			if a := nextMeaningfulIdx(runes, i); a >= 0 && isAlefVariant(runes[a]) {
+			if a := followingMeaningfulIdx(runes, i); a >= 0 && isAlefVariant(runes[a]) {
 				iso, fin := lamAlefLigature(runes[a])
-				if p := prevMeaningful(runes, i); p == joinDual || p == joinCausing {
+				if p := precedingMeaningful(runes, i); p == joinDual || p == joinCausing {
 					out[i] = fin
 				} else {
 					out[i] = iso
@@ -232,22 +232,22 @@ func Shape(runes []rune) []rune {
 		if t != joinRight && t != joinDual {
 			continue // hamza and the like keep their isolated form
 		}
-		// A letter joins its previous neighbour when that neighbour links
+		// A letter joins its preceding neighbour when that neighbour links
 		// forward (dual or causing), and joins its next neighbour when that
 		// neighbour links backward (dual, right-joining, or causing) — the
 		// latter only possible for a dual-joining letter.
-		p := prevMeaningful(runes, i)
-		joinsPrev := p == joinDual || p == joinCausing
-		n := nextMeaningful(runes, i)
-		joinsNext := t == joinDual && (n == joinDual || n == joinRight || n == joinCausing)
+		p := precedingMeaningful(runes, i)
+		joinsPreceding := p == joinDual || p == joinCausing
+		n := followingMeaningful(runes, i)
+		joinsFollowing := t == joinDual && (n == joinDual || n == joinRight || n == joinCausing)
 
 		var form int
 		switch {
-		case joinsPrev && joinsNext:
+		case joinsPreceding && joinsFollowing:
 			form = 3 // medial
-		case joinsPrev:
+		case joinsPreceding:
 			form = 1 // final
-		case joinsNext:
+		case joinsFollowing:
 			form = 2 // initial
 		default:
 			form = 0 // isolated

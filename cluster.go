@@ -35,7 +35,7 @@ func DefaultRides(runes []rune, i int) bool {
 	if !unicode.In(r, unicode.Mn, unicode.Me, unicode.Cf) {
 		return false // takes a cell of its own
 	}
-	return !DefectiveMark(PrevBase(runes, i), r)
+	return !DefectiveMark(PrecedingBase(runes, i), r)
 }
 
 // IsControl reports whether r is a C0 or C1 control character. A control has no
@@ -76,9 +76,9 @@ func scriptOf(r rune) string {
 const MarkAnchor = '◌' // DOTTED CIRCLE
 
 // DefectiveMark reports whether the combining mark r is ill-formed after the
-// base character prev. Two cases:
+// base character it follows. Two cases:
 //
-//   - No base at all (prev == 0): the mark opens the line with nothing to
+//   - No base at all (base == 0): the mark opens the line with nothing to
 //     anchor onto.
 //   - The mark is SCRIPT-SPECIFIC and the base belongs to a different script:
 //     a Hebrew accent over a CJK ideograph, niqqud on a Latin letter, an NKo
@@ -102,14 +102,14 @@ const MarkAnchor = '◌' // DOTTED CIRCLE
 // General diacritics (script=Inherited/Common - the U+0300..U+036F block, the
 // Arabic vowel marks, the kana voicing marks) belong to no script and
 // legitimately attach to any base, so they are never defective on this rule.
-func DefectiveMark(prev, r rune) bool {
+func DefectiveMark(base, r rune) bool {
 	if !IsMark(r) {
 		return false
 	}
-	if prev == 0 {
+	if base == 0 {
 		return true // nothing to anchor onto
 	}
-	if prev == MarkAnchor {
+	if base == MarkAnchor {
 		// A DOTTED CIRCLE the author actually typed is a legitimate base - it is
 		// the Unicode character for carrying an isolated mark. So a mark on it
 		// is well-formed: it composes onto that circle rather than being lifted
@@ -121,14 +121,14 @@ func DefectiveMark(prev, r rune) bool {
 		return false // general diacritic: attaches to any base
 	}
 	// Script-specific mark: well-formed only on a base of its own script.
-	return scriptOf(prev) != markScript
+	return scriptOf(base) != markScript
 }
 
-// PrevBase returns the cluster base for the rune at index i: the nearest
+// PrecedingBase returns the cluster base for the rune at index i: the nearest
 // preceding rune that is not itself a combining mark, or 0 when there is none.
-// It is what DefectiveMark wants for prev - a mark rides the last real
+// It is what DefectiveMark wants for its base - a mark rides the last real
 // character, not the mark in front of it.
-func PrevBase(runes []rune, i int) rune {
+func PrecedingBase(runes []rune, i int) rune {
 	for j := i - 1; j >= 0; j-- {
 		if !IsMark(runes[j]) {
 			return runes[j]

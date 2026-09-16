@@ -68,7 +68,7 @@ gives them cells of their own, and says so with a rule:
 
 ```go
 lay := khatool.Order(runes, baseRTL, func(runes []rune, i int) bool {
-    return myWidth(runes[i]) == 0 && !khatool.DefectiveMark(khatool.PrevBase(runes, i), runes[i])
+    return myWidth(runes[i]) == 0 && !khatool.DefectiveMark(khatool.PrecedingBase(runes, i), runes[i])
 })
 ```
 
